@@ -10,4 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Call API
-        run: curl https://rai-content-engine.vercel.app/api/analyze
+        run: |
+          echo "Calling API..."
+          curl -i https://rai-content-engine.vercel.app/api/analyze
