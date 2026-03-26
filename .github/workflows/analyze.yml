@@ -1,0 +1,12 @@
+name: Run Analyzer
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call API
+        run: curl https://rai-content-engine.vercel.app/api/analyze
