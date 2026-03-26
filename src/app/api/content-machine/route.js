@@ -1,18 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
-
-export async function GET() {
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-
-  // rest of logic
-}
-
+// =========================
+// 🧠 PROMPT BUILDER
+// =========================
 function buildPrompt(topic, mode) {
   const modeConfig = {
     business: {
@@ -59,7 +50,14 @@ HASHTAG:
 Panjang voiceover: cocok untuk video 30–60 detik.`;
 }
 
+// =========================
+// 🤖 AI GENERATORS
+// =========================
 async function generateWithClaude(topic, mode) {
+  const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  });
+
   const message = await anthropic.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 1024,
@@ -70,10 +68,15 @@ async function generateWithClaude(topic, mode) {
       },
     ],
   });
+
   return message.content[0].text;
 }
 
 async function generateWithOpenAI(topic, mode) {
+  const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     max_tokens: 1024,
@@ -84,9 +87,13 @@ async function generateWithOpenAI(topic, mode) {
       },
     ],
   });
+
   return completion.choices[0].message.content;
 }
 
+// =========================
+// 🚀 MAIN API (POST)
+// =========================
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -116,6 +123,7 @@ export async function POST(request) {
       result,
       meta: { topic, mode, engine, timestamp: new Date().toISOString() },
     });
+
   } catch (error) {
     console.error("[content-machine] error:", error.message);
 
@@ -130,6 +138,22 @@ export async function POST(request) {
   }
 }
 
+// =========================
+// 🔍 HEALTH CHECK (GET)
+// =========================
+export async function GET() {
+  return Response.json({
+    status: "ok",
+    engines: {
+      claude: process.env.ANTHROPIC_API_KEY ? "configured" : "missing",
+      openai: process.env.OPENAI_API_KEY ? "configured" : "missing",
+    },
+  });
+}
+
+// =========================
+// 🌐 CORS
+// =========================
 export async function OPTIONS() {
   return new Response(null, {
     status: 204,
@@ -137,19 +161,6 @@ export async function OPTIONS() {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
-    },
-  });
-}
-
-export async function GET() {
-  const claudeKey = process.env.ANTHROPIC_API_KEY;
-  const openaiKey = process.env.OPENAI_API_KEY;
-
-  return Response.json({
-    status: "ok",
-    engines: {
-      claude: claudeKey ? "configured" : "missing ANTHROPIC_API_KEY",
-      openai: openaiKey ? "configured" : "missing OPENAI_API_KEY",
     },
   });
 }
