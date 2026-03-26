@@ -64,10 +64,10 @@ async function migrateToSupabase(item: any): Promise<string | null> {
 
   // 🔥 COMPRESSION
   try {
-    buffer = await sharp(buffer)
-      .resize({ width: 1200, withoutEnlargement: true })
-      .jpeg({ quality: 70 })
-      .toBuffer()) as Buffer;
+    buffer = (await sharp(buffer)
+    .resize({ width: 1200, withoutEnlargement: true })
+    .jpeg({ quality: 70 })
+    .toBuffer()) as Buffer;
 
     console.log(
       "[COMPRESS]",
