@@ -48,7 +48,10 @@ export async function ingestDrive(folderId: string) {
 
   const client = await auth.getClient();
 
-  const drive = google.drive({ version: "v3", auth: client });
+  const drive = google.drive({
+    version: "v3",
+    auth: client as any,
+  });
 
   // =========================
   // 📂 FETCH FILES
