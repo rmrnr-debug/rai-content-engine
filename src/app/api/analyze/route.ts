@@ -38,7 +38,10 @@ async function migrateToSupabase(item: any): Promise<string | null> {
 
   const auth = getGoogleAuth();
   const client = await auth.getClient();
-  const drive = google.drive({ version: "v3", auth: client });
+  const drive = google.drive({
+    version: "v3",
+    auth: client as any,
+  });
 
   console.log("[migrate] downloading:", item.drive_file_id);
 
