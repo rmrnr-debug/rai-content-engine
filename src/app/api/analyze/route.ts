@@ -67,7 +67,7 @@ async function migrateToSupabase(item: any): Promise<string | null> {
     buffer = await sharp(buffer)
       .resize({ width: 1200, withoutEnlargement: true })
       .jpeg({ quality: 70 })
-      .toBuffer();
+      .toBuffer()) as Buffer;
 
     console.log(
       "[COMPRESS]",
