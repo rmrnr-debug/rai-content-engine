@@ -1,7 +1,21 @@
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@supabase/supabase-js'
 import { executeAction } from '@/lib/action-engine'
 
+// ✅ create client at runtime
+function getSupabase() {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Missing Supabase env')
+  }
+
+  return createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  )
+}
+
 export async function GET() {
+  const supabase = getSupabase()
+
   // ambil step pending
   const { data: steps, error } = await supabase
     .from('ops_mission_steps')
@@ -27,7 +41,7 @@ export async function GET() {
   for (const step of steps) {
     console.log('Processing step:', step.id)
 
-    // 🔒 LOCK STEP (anti double execution)
+    // 🔒 LOCK STEP
     const { data: lockedStep, error: lockError } = await supabase
       .from('ops_mission_steps')
       .update({ status: 'processing' })
@@ -44,29 +58,23 @@ export async function GET() {
     console.log('Executing step:', step.action_type)
 
     // 🔥 LOG START
-    const { error: logStartError } = await supabase
-      .from('ops_agent_events')
-      .insert([
-        {
-          mission_id: step.mission_id,
-          step_id: step.id,
-          event_type: 'step_started',
-          message: `Started ${step.action_type}`
-        }
-      ])
+    await supabase.from('ops_agent_events').insert([
+      {
+        mission_id: step.mission_id,
+        step_id: step.id,
+        event_type: 'step_started',
+        message: `Started ${step.action_type}`
+      }
+    ])
 
-    if (logStartError) {
-      console.error('LOG START ERROR:', logStartError)
-    }
-
-    // 🔥 EXECUTE REAL ACTION
+    // 🔥 EXECUTE
     const actionResult = await executeAction(step)
 
     let resultPayload = actionResult.success
       ? actionResult.data
       : { error: actionResult.message }
 
-    // 🔥 UPDATE STEP → completed + result
+    // 🔥 UPDATE STEP
     const { error: updateError } = await supabase
       .from('ops_mission_steps')
       .update({
@@ -91,22 +99,16 @@ export async function GET() {
     }
 
     // 🔥 LOG COMPLETE
-    const { error: logEndError } = await supabase
-      .from('ops_agent_events')
-      .insert([
-        {
-          mission_id: step.mission_id,
-          step_id: step.id,
-          event_type: actionResult.success
-            ? 'step_completed'
-            : 'step_failed',
-          message: JSON.stringify(resultPayload)
-        }
-      ])
-
-    if (logEndError) {
-      console.error('LOG COMPLETE ERROR:', logEndError)
-    }
+    await supabase.from('ops_agent_events').insert([
+      {
+        mission_id: step.mission_id,
+        step_id: step.id,
+        event_type: actionResult.success
+          ? 'step_completed'
+          : 'step_failed',
+        message: JSON.stringify(resultPayload)
+      }
+    ])
 
     results.push({
       step_id: step.id,
