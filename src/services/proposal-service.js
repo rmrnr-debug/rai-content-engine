@@ -1,8 +1,10 @@
-import { supabase } from '@/lib/supabase'
+import { getSupabaseServer } from '@/lib/supabase'
 import { checkCapGates } from '@/lib/cap-gates'
 import { evaluatePolicy } from '@/lib/policy-engine'
 
 export async function createProposal(input) {
+  const supabase = getSupabaseServer() // ✅ moved inside function
+
   const capCheck = checkCapGates(input)
   if (!capCheck.ok) {
     return { success: false, stage: 'cap_gates', error: capCheck.reason }
@@ -31,7 +33,7 @@ export async function createProposal(input) {
     return { success: false, stage: 'db', error: error.message }
   }
 
-  // 🔥 AUTO CREATE MISSION (simple version)
+  // CREATE MISSION
   const { data: mission, error: missionError } = await supabase
     .from('ops_missions')
     .insert([
@@ -51,31 +53,33 @@ export async function createProposal(input) {
       error: missionError.message
     }
   }
-// AUTO CREATE STEPS
-const { error: stepError } = await supabase
-  .from('ops_mission_steps')
-  .insert([
-    {
-      mission_id: mission.id,
-      step_order: 1,
-      action_type: 'analyze_request',
-      payload: { text: proposal.description }
-    },
-    {
-      mission_id: mission.id,
-      step_order: 2,
-      action_type: 'generate_plan',
-      payload: {}
-    }
-  ])
 
-if (stepError) {
-  return {
-    success: false,
-    stage: 'step_create',
-    error: stepError.message
+  // CREATE STEPS
+  const { error: stepError } = await supabase
+    .from('ops_mission_steps')
+    .insert([
+      {
+        mission_id: mission.id,
+        step_order: 1,
+        action_type: 'analyze_request',
+        payload: { text: proposal.description }
+      },
+      {
+        mission_id: mission.id,
+        step_order: 2,
+        action_type: 'generate_plan',
+        payload: {}
+      }
+    ])
+
+  if (stepError) {
+    return {
+      success: false,
+      stage: 'step_create',
+      error: stepError.message
+    }
   }
-}
+
   return {
     success: true,
     proposal,
