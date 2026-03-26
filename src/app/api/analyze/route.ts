@@ -1,3 +1,5 @@
+export const runtime = "nodejs";
+
 import { createClient } from "@supabase/supabase-js";
 import { analyzeImage } from "@/lib/analyzeMedia";
 import { google } from "googleapis";
@@ -38,6 +40,7 @@ async function migrateToSupabase(item: any): Promise<string | null> {
 
   const auth = getGoogleAuth();
   const client = await auth.getClient();
+
   const drive = google.drive({
     version: "v3",
     auth: client as any,
@@ -50,7 +53,8 @@ async function migrateToSupabase(item: any): Promise<string | null> {
     { responseType: "arraybuffer" }
   );
 
-  let buffer = Buffer.from(res.data as ArrayBuffer);
+  // ✅ FIXED TYPE HERE
+  let buffer: Buffer = Buffer.from(res.data as ArrayBuffer);
 
   const mimeType =
     res.headers["content-type"] ||
@@ -64,10 +68,10 @@ async function migrateToSupabase(item: any): Promise<string | null> {
 
   // 🔥 COMPRESSION
   try {
-    buffer = (await sharp(buffer)
-    .resize({ width: 1200, withoutEnlargement: true })
-    .jpeg({ quality: 70 })
-    .toBuffer()) as Buffer;
+    buffer = await sharp(buffer)
+      .resize({ width: 1200, withoutEnlargement: true })
+      .jpeg({ quality: 70 })
+      .toBuffer(); // ✅ NO CAST NEEDED
 
     console.log(
       "[COMPRESS]",
@@ -123,7 +127,7 @@ export async function GET() {
     .from("media_files")
     .select("*")
     .eq("status", "pending")
-    .limit(3); // ⚠️ SAFE PARALLEL LIMIT
+    .limit(3);
 
   if (error) {
     return Response.json({ error: error.message }, { status: 500 });
@@ -137,7 +141,6 @@ export async function GET() {
     console.log("[STEP] processing:", item.id);
 
     try {
-      // 🔒 lock job
       await supabase
         .from("media_files")
         .update({ status: "processing" })
@@ -188,7 +191,7 @@ export async function GET() {
 
       await supabase
         .from("media_files")
-        .update({ status: "pending" }) // retry later
+        .update({ status: "pending" })
         .eq("id", item.id);
     }
   });
