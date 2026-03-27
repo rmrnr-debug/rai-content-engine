@@ -44,7 +44,7 @@ async function analyzeRequest(payload) {
 
 async function generatePlan(payload) {
   // 🔥 TOGGLE THIS FOR TESTING RETRY
-  const FORCE_FAIL = true // <-- change to false after testing
+  const FORCE_FAIL = false // <-- change to false after testing
 
   if (FORCE_FAIL) {
     throw new Error('forced failure test')
