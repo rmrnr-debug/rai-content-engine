@@ -1,0 +1,16 @@
+name: Generate Content Daily
+
+on:
+  schedule:
+    - cron: "0 9 * * *"  # 9 AM daily
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Call Content Generator
+        run: |
+          echo "Generating content..."
+          curl -s https://rai-content-engine.vercel.app/api/generate-content
