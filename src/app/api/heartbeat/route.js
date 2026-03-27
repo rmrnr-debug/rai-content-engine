@@ -16,7 +16,7 @@ function getSupabase() {
 export async function GET() {
   const supabase = getSupabase()
 
-  // 1) fetch pending steps (broader window)
+  // 1) fetch pending steps
   const { data: steps, error } = await supabase
     .from('ops_mission_steps')
     .select('*')
@@ -37,9 +37,7 @@ export async function GET() {
     })
   }
 
-  // 2) determine executable steps (dependency rule)
-  // A step is executable if there is NO earlier step (same mission)
-  // with status != 'completed'
+  // 2) dependency filter
   const executableSteps = []
 
   for (const step of steps) {
@@ -58,19 +56,19 @@ export async function GET() {
     if (!blockers || blockers.length === 0) {
       executableSteps.push(step)
     } else {
-      console.log('BLOCKED:', step.id, 'by earlier steps')
+      console.log('BLOCKED:', step.id)
     }
   }
 
   if (executableSteps.length === 0) {
     return Response.json({
       success: true,
-      message: 'No executable steps (all blocked by dependencies)',
+      message: 'No executable steps',
       executed: []
     })
   }
 
-  // 3) OPTIONAL GUARD: only 1 step per mission per run (prevents parallel jumps)
+  // 3) one step per mission safeguard
   const seenMission = new Set()
   const finalSteps = []
 
@@ -113,8 +111,27 @@ export async function GET() {
       }
     ])
 
-    // 🔥 EXECUTE
-    const actionResult = await executeAction(step)
+    // 🔥 CONTEXT PASSING (KEY CHANGE)
+    const { data: prevSteps } = await supabase
+      .from('ops_mission_steps')
+      .select('*')
+      .eq('mission_id', step.mission_id)
+      .lt('step_order', step.step_order)
+      .order('step_order', { ascending: false })
+      .limit(1)
+
+    const prevResult = prevSteps?.[0]?.result || null
+
+    const enrichedStep = {
+      ...step,
+      payload: {
+        ...step.payload,
+        previous_result: prevResult
+      }
+    }
+
+    // 🔥 EXECUTE WITH CONTEXT
+    const actionResult = await executeAction(enrichedStep)
 
     const resultPayload = actionResult.success
       ? actionResult.data
