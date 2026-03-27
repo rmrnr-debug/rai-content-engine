@@ -16,7 +16,7 @@ function getSupabase() {
 export async function GET() {
   const supabase = getSupabase()
 
-  // 1) fetch pending steps
+  // 1️⃣ fetch pending steps
   const { data: steps, error } = await supabase
     .from('ops_mission_steps')
     .select('*')
@@ -37,21 +37,16 @@ export async function GET() {
     })
   }
 
-  // 2) dependency filter
+  // 2️⃣ filter executable steps (dependency check)
   const executableSteps = []
 
   for (const step of steps) {
-    const { data: blockers, error: blockErr } = await supabase
+    const { data: blockers } = await supabase
       .from('ops_mission_steps')
       .select('id')
       .eq('mission_id', step.mission_id)
       .lt('step_order', step.step_order)
       .neq('status', 'completed')
-
-    if (blockErr) {
-      console.error('BLOCK CHECK ERROR:', blockErr.message)
-      continue
-    }
 
     if (!blockers || blockers.length === 0) {
       executableSteps.push(step)
@@ -68,7 +63,7 @@ export async function GET() {
     })
   }
 
-  // 3) one step per mission safeguard
+  // 3️⃣ prevent parallel execution per mission
   const seenMission = new Set()
   const finalSteps = []
 
@@ -81,11 +76,21 @@ export async function GET() {
 
   let results = []
 
-  // 4) execute
+  // 4️⃣ execute steps
   for (const step of finalSteps) {
     console.log('Processing step:', step.id)
 
-    // 🔒 LOCK
+    // 🚫 STOP if max retry reached
+    if (
+      step.retry_count !== null &&
+      step.max_retry !== null &&
+      step.retry_count >= step.max_retry
+    ) {
+      console.log('SKIP (max retry reached):', step.id)
+      continue
+    }
+
+    // 🔒 LOCK STEP
     const { data: lockedStep, error: lockError } = await supabase
       .from('ops_mission_steps')
       .update({ status: 'processing' })
@@ -99,7 +104,26 @@ export async function GET() {
       continue
     }
 
-    console.log('Executing step:', step.action_type)
+    // 🔁 inject previous_result (context passing)
+    let previousResult = null
+
+    const { data: prevStep } = await supabase
+      .from('ops_mission_steps')
+      .select('result')
+      .eq('mission_id', step.mission_id)
+      .lt('step_order', step.step_order)
+      .order('step_order', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (prevStep?.result) {
+      previousResult = prevStep.result
+    }
+
+    const payloadWithContext = {
+      ...step.payload,
+      previous_result: previousResult
+    }
 
     // 🔥 LOG START
     await supabase.from('ops_agent_events').insert([
@@ -111,69 +135,47 @@ export async function GET() {
       }
     ])
 
-    // 🔥 CONTEXT PASSING (KEY CHANGE)
-    const { data: prevSteps } = await supabase
-      .from('ops_mission_steps')
-      .select('*')
-      .eq('mission_id', step.mission_id)
-      .lt('step_order', step.step_order)
-      .order('step_order', { ascending: false })
-      .limit(1)
+    // 🔥 EXECUTE
+    let actionResult
 
-    const prevResult = prevSteps?.[0]?.result || null
-
-    const enrichedStep = {
-      ...step,
-      payload: {
-        ...step.payload,
-        previous_result: prevResult
+    try {
+      actionResult = await executeAction({
+        ...step,
+        payload: payloadWithContext
+      })
+    } catch (err) {
+      actionResult = {
+        success: false,
+        message: err.message
       }
     }
 
-    // 🔥 EXECUTE WITH CONTEXT
-    const actionResult = await executeAction(enrichedStep)
+    const isSuccess = actionResult.success
 
-    const resultPayload = actionResult.success
+    // 🔁 HANDLE RETRY
+    let nextStatus = isSuccess ? 'completed' : 'pending'
+    let nextRetry = (step.retry_count || 0) + (isSuccess ? 0 : 1)
+
+    if (!isSuccess && step.max_retry && nextRetry >= step.max_retry) {
+      nextStatus = 'failed'
+    }
+
+    const resultPayload = isSuccess
       ? actionResult.data
       : { error: actionResult.message }
 
-    // 🔥 UPDATE
-    let newStatus = 'completed'
-    let newRetryCount = step.retry_count || 0
-    
-    if (!actionResult.success) {
-      if (newRetryCount < (step.max_retries || 2)) {
-        newStatus = 'pending' // retry again
-        newRetryCount += 1
-    
-        console.log(`RETRYING step ${step.id} (${newRetryCount})`)
-      } else {
-        newStatus = 'failed'
-        console.log(`FAILED step ${step.id} after retries`)
-      }
-    }
-    
+    // 🔥 UPDATE STEP
     const { error: updateError } = await supabase
       .from('ops_mission_steps')
       .update({
-        status: newStatus,
-        result: resultPayload,
-        retry_count: newRetryCount
+        status: nextStatus,
+        retry_count: nextRetry,
+        result: resultPayload
       })
       .eq('id', step.id)
 
     if (updateError) {
       console.error('STEP UPDATE ERROR:', updateError.message)
-
-      await supabase.from('ops_agent_events').insert([
-        {
-          mission_id: step.mission_id,
-          step_id: step.id,
-          event_type: 'step_failed',
-          message: updateError.message
-        }
-      ])
-
       continue
     }
 
@@ -182,9 +184,7 @@ export async function GET() {
       {
         mission_id: step.mission_id,
         step_id: step.id,
-        event_type: actionResult.success
-          ? 'step_completed'
-          : 'step_failed',
+        event_type: isSuccess ? 'step_completed' : 'step_failed',
         message: JSON.stringify(resultPayload)
       }
     ])
@@ -192,7 +192,8 @@ export async function GET() {
     results.push({
       step_id: step.id,
       action: step.action_type,
-      status: actionResult.success ? 'done' : 'failed'
+      status: isSuccess ? 'done' : nextStatus,
+      retry_count: nextRetry
     })
   }
 
