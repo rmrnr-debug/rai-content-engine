@@ -138,11 +138,27 @@ export async function GET() {
       : { error: actionResult.message }
 
     // 🔥 UPDATE
+    let newStatus = 'completed'
+    let newRetryCount = step.retry_count || 0
+    
+    if (!actionResult.success) {
+      if (newRetryCount < (step.max_retries || 2)) {
+        newStatus = 'pending' // retry again
+        newRetryCount += 1
+    
+        console.log(`RETRYING step ${step.id} (${newRetryCount})`)
+      } else {
+        newStatus = 'failed'
+        console.log(`FAILED step ${step.id} after retries`)
+      }
+    }
+    
     const { error: updateError } = await supabase
       .from('ops_mission_steps')
       .update({
-        status: actionResult.success ? 'completed' : 'failed',
-        result: resultPayload
+        status: newStatus,
+        result: resultPayload,
+        retry_count: newRetryCount
       })
       .eq('id', step.id)
 
