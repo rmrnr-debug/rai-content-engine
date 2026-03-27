@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { executeAction } from '@/lib/action-engine'
 
-// ✅ create client at runtime
+// ✅ runtime client
 function getSupabase() {
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error('Missing Supabase env')
@@ -16,13 +16,14 @@ function getSupabase() {
 export async function GET() {
   const supabase = getSupabase()
 
-  // ambil step pending
+  // 1) fetch pending steps (broader window)
   const { data: steps, error } = await supabase
     .from('ops_mission_steps')
     .select('*')
     .eq('status', 'pending')
+    .order('mission_id', { ascending: true })
     .order('step_order', { ascending: true })
-    .limit(5)
+    .limit(50)
 
   if (error) {
     return Response.json({ error: error.message }, { status: 500 })
@@ -36,12 +37,57 @@ export async function GET() {
     })
   }
 
-  let results = []
+  // 2) determine executable steps (dependency rule)
+  // A step is executable if there is NO earlier step (same mission)
+  // with status != 'completed'
+  const executableSteps = []
 
   for (const step of steps) {
+    const { data: blockers, error: blockErr } = await supabase
+      .from('ops_mission_steps')
+      .select('id')
+      .eq('mission_id', step.mission_id)
+      .lt('step_order', step.step_order)
+      .neq('status', 'completed')
+
+    if (blockErr) {
+      console.error('BLOCK CHECK ERROR:', blockErr.message)
+      continue
+    }
+
+    if (!blockers || blockers.length === 0) {
+      executableSteps.push(step)
+    } else {
+      console.log('BLOCKED:', step.id, 'by earlier steps')
+    }
+  }
+
+  if (executableSteps.length === 0) {
+    return Response.json({
+      success: true,
+      message: 'No executable steps (all blocked by dependencies)',
+      executed: []
+    })
+  }
+
+  // 3) OPTIONAL GUARD: only 1 step per mission per run (prevents parallel jumps)
+  const seenMission = new Set()
+  const finalSteps = []
+
+  for (const step of executableSteps) {
+    if (!seenMission.has(step.mission_id)) {
+      finalSteps.push(step)
+      seenMission.add(step.mission_id)
+    }
+  }
+
+  let results = []
+
+  // 4) execute
+  for (const step of finalSteps) {
     console.log('Processing step:', step.id)
 
-    // 🔒 LOCK STEP
+    // 🔒 LOCK
     const { data: lockedStep, error: lockError } = await supabase
       .from('ops_mission_steps')
       .update({ status: 'processing' })
@@ -70,11 +116,11 @@ export async function GET() {
     // 🔥 EXECUTE
     const actionResult = await executeAction(step)
 
-    let resultPayload = actionResult.success
+    const resultPayload = actionResult.success
       ? actionResult.data
       : { error: actionResult.message }
 
-    // 🔥 UPDATE STEP
+    // 🔥 UPDATE
     const { error: updateError } = await supabase
       .from('ops_mission_steps')
       .update({
@@ -84,7 +130,7 @@ export async function GET() {
       .eq('id', step.id)
 
     if (updateError) {
-      console.error('STEP UPDATE ERROR:', updateError)
+      console.error('STEP UPDATE ERROR:', updateError.message)
 
       await supabase.from('ops_agent_events').insert([
         {
