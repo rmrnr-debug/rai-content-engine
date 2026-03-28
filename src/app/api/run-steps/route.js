@@ -13,7 +13,7 @@ const openai = new OpenAI({
 export async function GET() {
   console.log("=== RUN STEPS START ===")
 
-  // 🔥 DEBUG ENV
+  // DEBUG ENV
   console.log("KEY PREFIX:", process.env.OPENAI_API_KEY?.slice(0, 10))
   console.log("KEY LENGTH:", process.env.OPENAI_API_KEY?.length)
 
@@ -34,7 +34,7 @@ export async function GET() {
   for (const step of steps || []) {
     console.log("Processing:", step.id, step.action_type)
 
-    // ✅ Dependency check
+    // Dependency check
     if (step.step_order > 1) {
       const { data: prev, error: prevError } = await supabase
         .from('ops_mission_steps')
@@ -58,7 +58,7 @@ export async function GET() {
     try {
       let output = null
 
-      // ===== STEP 1 =====
+      // STEP 1
       if (step.action_type === 'analyze_request') {
         const text = step.payload?.text || ""
 
@@ -68,14 +68,14 @@ export async function GET() {
         }
       }
 
-      // ===== STEP 2 =====
+      // STEP 2
       if (step.action_type === 'generate_plan') {
         output = {
           plan: ["Hook", "Problem", "Solution", "CTA"]
         }
       }
 
-      // ===== STEP 3 (AI) =====
+      // STEP 3 (AI)
       if (step.action_type === 'generate_content') {
         console.log("🔥 USING AI GENERATION:", step.id)
 
@@ -95,12 +95,19 @@ Gaya: santai, relatable, Indonesia
           model: "gpt-4o-mini",
           input: prompt
         })
-        
-        const text = response.output[0].content[0].text || ""
 
-        output = {
-          raw: text
+        // ✅ SAFE extraction
+        let text = ""
+
+        if (response.output_text) {
+          text = response.output_text
+        } else if (response.output?.[0]?.content?.[0]?.text) {
+          text = response.output[0].content[0].text
+        } else {
+          text = JSON.stringify(response)
         }
+
+        output = { raw: text }
 
         console.log("✅ AI OUTPUT GENERATED")
       }
@@ -113,9 +120,7 @@ Gaya: santai, relatable, Indonesia
         })
         .eq('id', step.id)
 
-      if (completeError) {
-        throw completeError
-      }
+      if (completeError) throw completeError
 
       console.log("STEP COMPLETED:", step.id)
 
