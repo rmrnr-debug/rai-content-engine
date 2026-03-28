@@ -6,16 +6,23 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
 
+// 🔥 SANITIZE KEY (CRITICAL FIX)
+const rawKey = process.env.OPENAI_API_KEY || ""
+const cleanKey = rawKey.replace(/\s+/g, "")
+
+console.log("=== OPENAI KEY DEBUG ===")
+console.log("RAW LENGTH:", rawKey.length)
+console.log("CLEAN LENGTH:", cleanKey.length)
+console.log("HAS SPACE RAW:", rawKey.includes(" "))
+console.log("HAS SPACE CLEAN:", cleanKey.includes(" "))
+
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: cleanKey,
   baseURL: "https://api.openai.com/v1"
 })
 
 export async function GET() {
   console.log("=== RUN STEPS START ===")
-
-  console.log("KEY LENGTH:", process.env.OPENAI_API_KEY?.length)
-console.log("HAS SPACE:", process.env.OPENAI_API_KEY?.includes(" "))
 
   const { data: steps, error } = await supabase
     .from('ops_mission_steps')
@@ -25,7 +32,7 @@ console.log("HAS SPACE:", process.env.OPENAI_API_KEY?.includes(" "))
 
   if (error) {
     console.error("FETCH ERROR:", error)
-    return Response.json({ success: false })
+    return Response.json({ success: false, error: error.message }, { status: 500 })
   }
 
   let processed = 0
@@ -35,7 +42,7 @@ console.log("HAS SPACE:", process.env.OPENAI_API_KEY?.includes(" "))
 
     console.log("Processing:", step.id, step.action_type)
 
-    // ✅ Dependency check (strict sequential)
+    // ✅ dependency check
     if (step.step_order > 1) {
       const { data: prev } = await supabase
         .from('ops_mission_steps')
@@ -45,7 +52,7 @@ console.log("HAS SPACE:", process.env.OPENAI_API_KEY?.includes(" "))
         .single()
 
       if (!prev || prev.status !== 'completed') {
-        console.log("⏭ Skip (waiting dependency):", step.id)
+        console.log("⏭ Skip dependency:", step.id)
         continue
       }
     }
@@ -86,8 +93,10 @@ Buat konten Instagram/TikTok untuk bisnis island stay.
 Tema: ${step.payload?.text || "island escape"}
 
 Format:
-1. Caption
-2. Script video (Hook → Scene → CTA)
+1. Caption menarik (max 150 kata)
+2. Script video pendek (Hook → Scene → CTA)
+
+Gaya: santai, relatable, Indonesia
         `
 
         const response = await openai.responses.create({
@@ -103,7 +112,7 @@ Format:
           text = response.output[0].content[0].text
         }
 
-        text = text?.slice(0, 2000) || "No content"
+        text = text?.slice(0, 2000) || "No content generated"
 
         output = {
           caption: text.split("\n")[0] || text,
@@ -113,7 +122,7 @@ Format:
         console.log("✅ AI DONE")
       }
 
-      // ✅ COMPLETE STEP
+      // ✅ mark completed
       const { error: updateError } = await supabase
         .from('ops_mission_steps')
         .update({
@@ -135,9 +144,7 @@ Format:
         .from('ops_mission_steps')
         .update({
           status: 'failed',
-          output: {
-            error: err.message
-          }
+          output: { error: err.message }
         })
         .eq('id', step.id)
     }
