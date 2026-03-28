@@ -14,6 +14,8 @@ const openai = new OpenAI({
 export async function GET() {
   console.log("=== RUN STEPS START ===")
 
+  console.log("FULL KEY:", process.env.OPENAI_API_KEY)
+
   const { data: steps, error } = await supabase
     .from('ops_mission_steps')
     .select('*')
