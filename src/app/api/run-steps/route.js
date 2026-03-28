@@ -112,15 +112,21 @@ Tema: ${step.payload?.text || "island escape"}
 
         let text = ""
 
+        // ✅ SAFE extraction
         if (response.output_text) {
           text = response.output_text
         } else if (response.output?.[0]?.content?.[0]?.text) {
           text = response.output[0].content[0].text
-        } else {
-          text = JSON.stringify(response)
         }
-
-        output = { raw: text }
+        
+        // ✅ HARD LIMIT (prevents DB issues)
+        text = text?.slice(0, 2000) || "No content generated"
+        
+        // ✅ STRUCTURED OUTPUT
+        output = {
+          caption: text.split("\n")[0] || text,
+          content: text
+        }
       }
 
       const { error: completeError } = await supabase
