@@ -12,6 +12,7 @@ export async function GET() {
     .from('ops_mission_steps')
     .select('*')
     .eq('status', 'pending')
+    .order('step_order', { ascending: true })
     .limit(5)
 
   if (fetchError) {
@@ -24,21 +25,15 @@ export async function GET() {
   for (const step of steps || []) {
     console.log("Processing step:", step.id, step.action_type)
 
-    // mark as running
-    const { error: runningError } = await supabase
+    await supabase
       .from('ops_mission_steps')
       .update({ status: 'running' })
       .eq('id', step.id)
 
-    if (runningError) {
-      console.error("FAILED TO SET RUNNING:", runningError)
-      continue
-    }
-
     try {
       let output = null
 
-      // ===== EXECUTION LOGIC =====
+      // STEP 1
       if (step.action_type === 'analyze_request') {
         const text = step.payload?.text || ""
 
@@ -48,14 +43,26 @@ export async function GET() {
         }
       }
 
+      // STEP 2
       if (step.action_type === 'generate_plan') {
         output = {
           plan: ["Hook", "Problem", "Solution", "CTA"]
         }
       }
 
-      // ===== SAVE SUCCESS =====
-      const { error: completeError } = await supabase
+      // STEP 3 (NEW)
+      if (step.action_type === 'generate_content') {
+        output = {
+          caption: "Escape dari Jakarta ke pulau sepi 🌴 Nikmati hidup tanpa distraksi.",
+          script: [
+            "Hook: Capek kota?",
+            "Visual: laut, angin, santai",
+            "Closing: booking sekarang"
+          ]
+        }
+      }
+
+      await supabase
         .from('ops_mission_steps')
         .update({
           status: 'completed',
@@ -63,16 +70,12 @@ export async function GET() {
         })
         .eq('id', step.id)
 
-      if (completeError) {
-        throw completeError
-      }
-
       console.log("STEP COMPLETED:", step.id)
 
     } catch (err) {
       console.error("STEP FAILED:", step.id, err)
 
-      const { error: failError } = await supabase
+      await supabase
         .from('ops_mission_steps')
         .update({
           status: 'failed',
@@ -80,10 +83,6 @@ export async function GET() {
           output: { error: err.message }
         })
         .eq('id', step.id)
-
-      if (failError) {
-        console.error("FAILED TO UPDATE FAILURE STATE:", failError)
-      }
     }
   }
 

@@ -10,14 +10,12 @@ export async function createProposal(input) {
   // 1. CAP GATES
   const capCheck = checkCapGates(input)
   if (!capCheck.ok) {
-    console.log("CAP GATE FAILED:", capCheck.reason)
     return { success: false, stage: 'cap_gates', error: capCheck.reason }
   }
 
   // 2. POLICY
   const policyCheck = evaluatePolicy(input)
   if (!policyCheck.ok) {
-    console.log("POLICY FAILED:", policyCheck.reason)
     return { success: false, stage: 'policy', error: policyCheck.reason }
   }
 
@@ -36,7 +34,6 @@ export async function createProposal(input) {
     .single()
 
   if (proposalError || !proposal) {
-    console.error("PROPOSAL INSERT FAILED:", proposalError)
     return { success: false, stage: 'proposal_insert', error: proposalError?.message }
   }
 
@@ -56,61 +53,52 @@ export async function createProposal(input) {
     .single()
 
   if (missionError || !mission) {
-    console.error("MISSION INSERT FAILED:", missionError)
-    return {
-      success: false,
-      stage: 'mission_create',
-      error: missionError?.message
-    }
+    return { success: false, stage: 'mission_create', error: missionError?.message }
   }
 
   console.log("MISSION CREATED:", mission.id)
 
-  // 5. PREPARE STEPS (explicit, visible)
+  // 5. CREATE STEPS (NOW 3 STEPS)
   const steps = [
     {
       mission_id: mission.id,
       step_order: 1,
       action_type: 'analyze_request',
-      payload: { text: proposal.description }
+      status: 'pending',
+      payload: { text: proposal.description },
+      retry_count: 0,
+      max_retry: 2
     },
     {
       mission_id: mission.id,
       step_order: 2,
       action_type: 'generate_plan',
-      payload: {}
+      status: 'pending',
+      payload: {},
+      retry_count: 0,
+      max_retry: 2
+    },
+    {
+      mission_id: mission.id,
+      step_order: 3,
+      action_type: 'generate_content',
+      status: 'pending',
+      payload: {},
+      retry_count: 0,
+      max_retry: 2
     }
   ]
 
-  console.log("STEPS TO INSERT:", steps)
-
-  // 6. INSERT STEPS
   const { data: insertedSteps, error: stepError } = await supabase
     .from('ops_mission_steps')
     .insert(steps)
     .select()
 
   if (stepError) {
-    console.error("STEP INSERT FAILED:", stepError)
-    return {
-      success: false,
-      stage: 'step_create',
-      error: stepError.message
-    }
+    return { success: false, stage: 'step_create', error: stepError.message }
   }
 
-  console.log("STEPS INSERTED:", insertedSteps?.length)
-
-  if (!insertedSteps || insertedSteps.length === 0) {
-    console.error("NO STEPS INSERTED (CRITICAL)")
-    return {
-      success: false,
-      stage: 'step_create',
-      error: 'No steps inserted'
-    }
-  }
-
-  console.log("=== END SUCCESS ===")
+  console.log("STEPS CREATED:", insertedSteps.length)
 
   return {
     success: true,
