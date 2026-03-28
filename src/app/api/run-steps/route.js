@@ -126,13 +126,17 @@ Gaya: santai, relatable, Indonesia
       console.log("STEP COMPLETED:", step.id)
 
     } catch (err) {
-      console.error("❌ STEP FAILED:", step.id, err.message)
-
+      console.error("❌ STEP FAILED FULL:", err)
+    
       await supabase
         .from('ops_mission_steps')
         .update({
           status: 'failed',
-          output: { error: err.message },
+          output: {
+            error: err.message,
+            stack: err.stack,
+            raw: JSON.stringify(err, null, 2)
+          },
           retry_count: (step.retry_count || 0) + 1
         })
         .eq('id', step.id)
