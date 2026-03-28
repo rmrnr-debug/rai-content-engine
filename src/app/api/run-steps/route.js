@@ -14,7 +14,6 @@ const openai = new OpenAI({
 export async function GET() {
   console.log("=== RUN STEPS START ===")
 
-  // DEBUG ENV
   console.log("KEY PREFIX:", process.env.OPENAI_API_KEY?.slice(0, 10))
   console.log("KEY LENGTH:", process.env.OPENAI_API_KEY?.length)
 
@@ -50,7 +49,6 @@ export async function GET() {
       }
     }
 
-    // mark running
     await supabase
       .from('ops_mission_steps')
       .update({ status: 'running' })
@@ -76,28 +74,42 @@ export async function GET() {
         }
       }
 
-      // STEP 3 (AI)
+      // STEP 3 (AI with full debug)
       if (step.action_type === 'generate_content') {
-        console.log("🔥 USING AI GENERATION:", step.id)
+        console.log("🔥 BEFORE OPENAI CALL:", step.id)
 
         const prompt = `
 Buat konten Instagram/TikTok untuk bisnis island stay.
 
 Tema: ${step.payload?.text || "island escape"}
-
-Format:
-1. Caption menarik (max 150 kata)
-2. Script video pendek (Hook → Scene → CTA)
-
-Gaya: santai, relatable, Indonesia
         `
 
-        const response = await openai.responses.create({
-          model: "gpt-4o-mini",
-          input: prompt
-        })
+        let response
 
-        // ✅ SAFE extraction
+        try {
+          response = await openai.responses.create({
+            model: "gpt-4o-mini",
+            input: prompt
+          })
+        } catch (apiErr) {
+          console.error("❌ OPENAI CALL FAILED:", apiErr)
+
+          await supabase
+            .from('ops_mission_steps')
+            .update({
+              status: 'failed',
+              output: {
+                error: apiErr.message,
+                raw: JSON.stringify(apiErr, null, 2)
+              }
+            })
+            .eq('id', step.id)
+
+          continue
+        }
+
+        console.log("✅ AFTER OPENAI CALL")
+
         let text = ""
 
         if (response.output_text) {
@@ -109,8 +121,6 @@ Gaya: santai, relatable, Indonesia
         }
 
         output = { raw: text }
-
-        console.log("✅ AI OUTPUT GENERATED")
       }
 
       const { error: completeError } = await supabase
@@ -126,15 +136,14 @@ Gaya: santai, relatable, Indonesia
       console.log("STEP COMPLETED:", step.id)
 
     } catch (err) {
-      console.error("❌ STEP FAILED FULL:", err)
-    
+      console.error("❌ STEP FAILED:", err)
+
       await supabase
         .from('ops_mission_steps')
         .update({
           status: 'failed',
           output: {
             error: err.message,
-            stack: err.stack,
             raw: JSON.stringify(err, null, 2)
           },
           retry_count: (step.retry_count || 0) + 1
