@@ -14,41 +14,40 @@ const openai = new OpenAI({
 export async function GET() {
   console.log("=== RUN STEPS START ===")
 
-  console.log("KEY PREFIX:", process.env.OPENAI_API_KEY?.slice(0, 10))
-  console.log("KEY LENGTH:", process.env.OPENAI_API_KEY?.length)
-
-  const { data: steps, error: fetchError } = await supabase
+  const { data: steps, error } = await supabase
     .from('ops_mission_steps')
     .select('*')
-    .eq('status', 'pending')
-    .order('step_order', { ascending: true })
-    .limit(10)
+    .order('created_at', { ascending: true })
+    .limit(20)
 
-  if (fetchError) {
-    console.error("FETCH ERROR:", fetchError)
-    return Response.json({ success: false, error: fetchError.message }, { status: 500 })
+  if (error) {
+    console.error("FETCH ERROR:", error)
+    return Response.json({ success: false })
   }
 
-  console.log("STEPS FETCHED:", steps?.length)
+  let processed = 0
 
   for (const step of steps || []) {
+    if (step.status !== 'pending') continue
+
     console.log("Processing:", step.id, step.action_type)
 
-    // Dependency check
+    // ✅ Dependency check (strict sequential)
     if (step.step_order > 1) {
-      const { data: prev, error: prevError } = await supabase
+      const { data: prev } = await supabase
         .from('ops_mission_steps')
         .select('*')
         .eq('mission_id', step.mission_id)
         .eq('step_order', step.step_order - 1)
         .single()
 
-      if (prevError || !prev || prev.status !== 'completed') {
-        console.log("Skip (dependency not met):", step.id)
+      if (!prev || prev.status !== 'completed') {
+        console.log("⏭ Skip (waiting dependency):", step.id)
         continue
       }
     }
 
+    // mark running
     await supabase
       .from('ops_mission_steps')
       .update({ status: 'running' })
@@ -57,7 +56,7 @@ export async function GET() {
     try {
       let output = null
 
-      // STEP 1
+      // ===== STEP 1 =====
       if (step.action_type === 'analyze_request') {
         const text = step.payload?.text || ""
 
@@ -67,69 +66,52 @@ export async function GET() {
         }
       }
 
-      // STEP 2
+      // ===== STEP 2 =====
       if (step.action_type === 'generate_plan') {
         output = {
           plan: ["Hook", "Problem", "Solution", "CTA"]
         }
       }
 
-      // STEP 3 (AI with full debug)
+      // ===== STEP 3 (AI) =====
       if (step.action_type === 'generate_content') {
-        console.log("🔥 BEFORE OPENAI CALL:", step.id)
+        console.log("🔥 OPENAI CALL:", step.id)
 
         const prompt = `
 Buat konten Instagram/TikTok untuk bisnis island stay.
 
 Tema: ${step.payload?.text || "island escape"}
+
+Format:
+1. Caption
+2. Script video (Hook → Scene → CTA)
         `
 
-        let response
-
-        try {
-          response = await openai.responses.create({
-            model: "gpt-4o-mini",
-            input: prompt
-          })
-        } catch (apiErr) {
-          console.error("❌ OPENAI CALL FAILED:", apiErr)
-
-          await supabase
-            .from('ops_mission_steps')
-            .update({
-              status: 'failed',
-              output: {
-                error: apiErr.message,
-                raw: JSON.stringify(apiErr, null, 2)
-              }
-            })
-            .eq('id', step.id)
-
-          continue
-        }
-
-        console.log("✅ AFTER OPENAI CALL")
+        const response = await openai.responses.create({
+          model: "gpt-4o-mini",
+          input: prompt
+        })
 
         let text = ""
 
-        // ✅ SAFE extraction
         if (response.output_text) {
           text = response.output_text
         } else if (response.output?.[0]?.content?.[0]?.text) {
           text = response.output[0].content[0].text
         }
-        
-        // ✅ HARD LIMIT (prevents DB issues)
-        text = text?.slice(0, 2000) || "No content generated"
-        
-        // ✅ STRUCTURED OUTPUT
+
+        text = text?.slice(0, 2000) || "No content"
+
         output = {
           caption: text.split("\n")[0] || text,
           content: text
         }
+
+        console.log("✅ AI DONE")
       }
 
-      const { error: completeError } = await supabase
+      // ✅ COMPLETE STEP
+      const { error: updateError } = await supabase
         .from('ops_mission_steps')
         .update({
           status: 'completed',
@@ -137,22 +119,22 @@ Tema: ${step.payload?.text || "island escape"}
         })
         .eq('id', step.id)
 
-      if (completeError) throw completeError
+      if (updateError) throw updateError
 
-      console.log("STEP COMPLETED:", step.id)
+      processed++
+
+      console.log("✅ COMPLETED:", step.id)
 
     } catch (err) {
-      console.error("❌ STEP FAILED:", err)
+      console.error("❌ FAILED:", step.id, err.message)
 
       await supabase
         .from('ops_mission_steps')
         .update({
           status: 'failed',
           output: {
-            error: err.message,
-            raw: JSON.stringify(err, null, 2)
-          },
-          retry_count: (step.retry_count || 0) + 1
+            error: err.message
+          }
         })
         .eq('id', step.id)
     }
@@ -162,6 +144,6 @@ Tema: ${step.payload?.text || "island escape"}
 
   return Response.json({
     success: true,
-    processed: steps?.length || 0
+    processed
   })
 }
