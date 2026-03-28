@@ -14,7 +14,8 @@ const openai = new OpenAI({
 export async function GET() {
   console.log("=== RUN STEPS START ===")
 
-  console.log("FULL KEY:", process.env.OPENAI_API_KEY)
+  console.log("KEY LENGTH:", process.env.OPENAI_API_KEY?.length)
+console.log("HAS SPACE:", process.env.OPENAI_API_KEY?.includes(" "))
 
   const { data: steps, error } = await supabase
     .from('ops_mission_steps')
