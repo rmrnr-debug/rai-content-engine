@@ -7,7 +7,8 @@ const supabase = createClient(
 )
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: "https://api.openai.com/v1"
 })
 
 export async function GET() {
