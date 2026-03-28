@@ -13,31 +13,39 @@ const openai = new OpenAI({
 export async function GET() {
   console.log("=== RUN STEPS START ===")
 
-  const { data: steps } = await supabase
+  const { data: steps, error: fetchError } = await supabase
     .from('ops_mission_steps')
     .select('*')
     .eq('status', 'pending')
     .order('step_order', { ascending: true })
     .limit(10)
 
+  if (fetchError) {
+    console.error("FETCH ERROR:", fetchError)
+    return Response.json({ success: false, error: fetchError.message }, { status: 500 })
+  }
+
+  console.log("STEPS FETCHED:", steps?.length)
+
   for (const step of steps || []) {
     console.log("Processing:", step.id, step.action_type)
 
-    // Dependency check
+    // ✅ Dependency check
     if (step.step_order > 1) {
-      const { data: prev } = await supabase
+      const { data: prev, error: prevError } = await supabase
         .from('ops_mission_steps')
         .select('*')
         .eq('mission_id', step.mission_id)
         .eq('step_order', step.step_order - 1)
         .single()
 
-      if (!prev || prev.status !== 'completed') {
-        console.log("Skip (dependency):", step.id)
+      if (prevError || !prev || prev.status !== 'completed') {
+        console.log("Skip (dependency not met):", step.id)
         continue
       }
     }
 
+    // mark running
     await supabase
       .from('ops_mission_steps')
       .update({ status: 'running' })
@@ -46,7 +54,7 @@ export async function GET() {
     try {
       let output = null
 
-      // STEP 1
+      // ===== STEP 1 =====
       if (step.action_type === 'analyze_request') {
         const text = step.payload?.text || ""
 
@@ -56,42 +64,44 @@ export async function GET() {
         }
       }
 
-      // STEP 2
+      // ===== STEP 2 =====
       if (step.action_type === 'generate_plan') {
         output = {
           plan: ["Hook", "Problem", "Solution", "CTA"]
         }
       }
 
-      // STEP 3 (AI CONTENT)
+      // ===== STEP 3 (AI) =====
       if (step.action_type === 'generate_content') {
+        console.log("🔥 USING AI GENERATION:", step.id)
+
         const prompt = `
-        Buat konten Instagram/TikTok untuk bisnis island stay.
+Buat konten Instagram/TikTok untuk bisnis island stay.
 
-        Tema: ${step.payload?.text || "island escape"}
+Tema: ${step.payload?.text || "island escape"}
 
-        Format:
-        1. Caption menarik (max 150 kata)
-        2. Script video pendek (Hook → Scene → CTA)
+Format:
+1. Caption menarik (max 150 kata)
+2. Script video pendek (Hook → Scene → CTA)
 
-        Gaya: santai, relatable, Indonesia
+Gaya: santai, relatable, Indonesia
         `
 
         const response = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          messages: [
-            { role: "user", content: prompt }
-          ]
+          messages: [{ role: "user", content: prompt }]
         })
 
-        const text = response.choices[0].message.content
+        const text = response.choices?.[0]?.message?.content || ""
 
         output = {
           raw: text
         }
+
+        console.log("✅ AI OUTPUT GENERATED")
       }
 
-      await supabase
+      const { error: completeError } = await supabase
         .from('ops_mission_steps')
         .update({
           status: 'completed',
@@ -99,8 +109,14 @@ export async function GET() {
         })
         .eq('id', step.id)
 
+      if (completeError) {
+        throw completeError
+      }
+
+      console.log("STEP COMPLETED:", step.id)
+
     } catch (err) {
-      console.error("ERROR:", err)
+      console.error("❌ STEP FAILED:", step.id, err.message)
 
       await supabase
         .from('ops_mission_steps')
@@ -113,5 +129,10 @@ export async function GET() {
     }
   }
 
-  return Response.json({ success: true })
+  console.log("=== RUN STEPS END ===")
+
+  return Response.json({
+    success: true,
+    processed: steps?.length || 0
+  })
 }
