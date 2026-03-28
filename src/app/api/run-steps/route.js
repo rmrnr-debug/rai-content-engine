@@ -13,6 +13,10 @@ const openai = new OpenAI({
 export async function GET() {
   console.log("=== RUN STEPS START ===")
 
+  // 🔥 DEBUG ENV
+  console.log("KEY PREFIX:", process.env.OPENAI_API_KEY?.slice(0, 10))
+  console.log("KEY LENGTH:", process.env.OPENAI_API_KEY?.length)
+
   const { data: steps, error: fetchError } = await supabase
     .from('ops_mission_steps')
     .select('*')
