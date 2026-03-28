@@ -91,12 +91,12 @@ Format:
 Gaya: santai, relatable, Indonesia
         `
 
-        const response = await openai.chat.completions.create({
+        const response = await openai.responses.create({
           model: "gpt-4o-mini",
-          messages: [{ role: "user", content: prompt }]
+          input: prompt
         })
-
-        const text = response.choices?.[0]?.message?.content || ""
+        
+        const text = response.output[0].content[0].text || ""
 
         output = {
           raw: text
