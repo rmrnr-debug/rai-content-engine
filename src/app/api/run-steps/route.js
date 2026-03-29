@@ -100,7 +100,7 @@ Gaya: santai, relatable, Indonesia
         `
 
         const response = await openai.responses.create({
-          model: "gpt-4o-mini",
+          model: "gpt-3.5-turbo",
           input: prompt
         })
 
